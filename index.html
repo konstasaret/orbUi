@@ -240,42 +240,35 @@ function startOkState() {
 }
 
 // =================================================================
-// Animation: QR acceptance — yellow ring rests, "reads" with a sweep,
-// then settles to warm white (same ring as OK state)
+// Animation: QR acceptance — inner ring blinks white, outer ring
+// (half the inner's width) blinks soft green, both in sync
 // =================================================================
 function startQrAcceptance() {
   let rafId = null, running = true, speed = 1;
   const cx = SIZE / 2, cy = SIZE / 2;
-  const R_OUTER = 158, R_INNER = 128;
+  const R_OUTER = 168, R_INNER = 128;
   const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
-  const WARM_WHITE = [255, 238, 210], WARM_YELLOW = [255, 196, 84];
+  const WHITE = [255, 238, 210], SOFT_GREEN = [140, 210, 160];
   const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const mix = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 
   // full-circle section centre angles (same geometry as OK state)
   const angles = [];
   for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);   // right side incl bottom + top
   for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);    // left side interior
-  const TWO_PI = Math.PI * 2;
-  const angDist = (a, b) => { let d = Math.abs(a - b) % TWO_PI; return d > Math.PI ? TWO_PI - d : d; };
 
   const W_TOP = 13, W_BOTTOM = 32.5;
   const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
-  function drawSection(ang, intensity, color, glowScale = 1) {
+  function drawSection(ang, radius, thickScale, intensity, color, glowScale) {
     const a0 = ang - STEP / 2 + GAP / 2, a1 = ang + STEP / 2 - GAP / 2;
-    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
-    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang);
+    ctx.beginPath(); ctx.arc(cx, cy, radius, a0, a1);
+    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang) * thickScale;
     ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
     ctx.shadowBlur = 18 * intensity * glowScale;
-    ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
+    ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
     ctx.stroke(); ctx.shadowBlur = 0;
   }
 
-  // timeline (ms, scaled): rest+read -> settle to warm white
-  const READ1 = 2800;     // reading sweep duration
-  const SETTLE1 = 3500;   // crossfade to warm white done
+  const PERIOD = 1150;   // ms per blink
   let startTime = null;
 
   function frame(t) {
@@ -284,36 +277,18 @@ function startQrAcceptance() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    let color, base, sweepBoost, glow;
-    if (e < READ1) {
-      // READING: warm yellow ring with a bright sweep travelling around it
-      ui.label.textContent = 'Reading';
-      color = WARM_YELLOW; base = 0.5; sweepBoost = 0.9; glow = 1;
-    } else if (e < SETTLE1) {
-      // SETTLE: crossfade yellow -> warm white, sweep fades, ring fills in
-      const p = clamp((e - READ1) / (SETTLE1 - READ1), 0, 1);
-      ui.label.textContent = 'Accepted';
-      color = mix(WARM_YELLOW, WARM_WHITE, p); base = lerp(0.5, 1, p); sweepBoost = 0.9 * (1 - p); glow = 1;
-    } else {
-      // SETTLED: steady warm white (matches OK state), gentle breathe
-      ui.label.textContent = 'Accepted';
-      const breathe = 0.5 + 0.5 * Math.sin((e - SETTLE1) / 600);
-      color = WARM_WHITE; base = 0.92 + 0.08 * breathe; sweepBoost = 0; glow = 1.1 + 0.2 * breathe;
-    }
+    // blink: sharp-ish pulse with a dim floor so both rings flash together
+    const phase = (e % PERIOD) / PERIOD;
+    const pulse = Math.pow(Math.sin(phase * Math.PI), 2.4);
+    const innerI = 0.10 + 0.90 * pulse;   // inner ring white blink
+    const outerI = 0.08 + 0.80 * pulse;   // outer ring soft green blink
 
-    // thin outer ring
-    ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, 0, TWO_PI);
-    ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(color, 0.22); ctx.stroke();
-
-    const sweep = BOTTOM + (e / 1000) * 3.4;   // rotating reader position
     for (const a of angles) {
-      let intensity = base;
-      if (sweepBoost > 0) {
-        const h = Math.exp(-Math.pow(angDist(a, sweep) / 0.5, 2));
-        intensity = Math.min(1.6, base + sweepBoost * h);
-      }
-      drawSection(a, intensity, color, glow);
+      drawSection(a, R_OUTER, 0.5, outerI, SOFT_GREEN, 1.1);   // outer: half width, soft green
+      drawSection(a, R_INNER, 1.0, innerI, WHITE, 1.0);        // inner: white
     }
+
+    ui.label.textContent = 'Accepted';
     ui.pct.textContent = '';
     rafId = requestAnimationFrame(frame);
   }
