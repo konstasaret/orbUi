@@ -240,35 +240,54 @@ function startOkState() {
 }
 
 // =================================================================
-// Animation: QR acceptance — inner ring blinks white, outer ring
-// (half the inner's width) blinks soft green, both in sync
+// Animation: QR acceptance — rest (closed outer ring + yellow inner),
+// then ONE blink (inner white, outer soft green) on acceptance
 // =================================================================
 function startQrAcceptance() {
   let rafId = null, running = true, speed = 1;
   const cx = SIZE / 2, cy = SIZE / 2;
   const R_OUTER = 168, R_INNER = 128;
   const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
-  const WHITE = [255, 238, 210], SOFT_GREEN = [140, 210, 160];
+  const WHITE = [255, 238, 210], YELLOW = [255, 196, 84], SOFT_GREEN = [140, 210, 160];
   const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 
-  // full-circle section centre angles (same geometry as OK state)
+  // inner ring section centre angles (same geometry as OK state)
   const angles = [];
-  for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);   // right side incl bottom + top
-  for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);    // left side interior
+  for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);
+  for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);
 
   const W_TOP = 13, W_BOTTOM = 32.5;
   const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
-  function drawSection(ang, radius, thickScale, intensity, color, glowScale) {
+
+  function drawSection(ang, intensity, color, glowScale) {
     const a0 = ang - STEP / 2 + GAP / 2, a1 = ang + STEP / 2 - GAP / 2;
-    ctx.beginPath(); ctx.arc(cx, cy, radius, a0, a1);
-    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang) * thickScale;
+    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang);
     ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
     ctx.shadowBlur = 18 * intensity * glowScale;
-    ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
+    ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
     ctx.stroke(); ctx.shadowBlur = 0;
   }
 
-  const PERIOD = 1150;   // ms per blink
+  // closed (gapless) outer ring, half the inner width
+  function drawClosedOuter(intensity, color, glowScale) {
+    const segs = 160; ctx.lineCap = 'butt';
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2, mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0 - 0.012, a1 + 0.012);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.shadowColor = rgba(color, 0.7 * Math.min(1, intensity));
+      ctx.shadowBlur = 14 * intensity * glowScale;
+      ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // timeline (ms, scaled): rest -> single blink -> hold rest
+  const REST1 = 1400, BLINK_DUR = 750;
   let startTime = null;
 
   function frame(t) {
@@ -277,18 +296,18 @@ function startQrAcceptance() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    // blink: sharp-ish pulse with a dim floor so both rings flash together
-    const phase = (e % PERIOD) / PERIOD;
-    const pulse = Math.pow(Math.sin(phase * Math.PI), 2.4);
-    const innerI = 0.10 + 0.90 * pulse;   // inner ring white blink
-    const outerI = 0.08 + 0.80 * pulse;   // outer ring soft green blink
+    // one blink: a single sine hump during [REST1, REST1+BLINK_DUR]
+    let pulse = 0;
+    if (e >= REST1 && e < REST1 + BLINK_DUR) pulse = Math.sin((e - REST1) / BLINK_DUR * Math.PI);
 
-    for (const a of angles) {
-      drawSection(a, R_OUTER, 0.5, outerI, SOFT_GREEN, 1.1);   // outer: half width, soft green
-      drawSection(a, R_INNER, 1.0, innerI, WHITE, 1.0);        // inner: white
-    }
+    const innerColor = mix(YELLOW, WHITE, pulse);
+    const innerI = 0.55 + 0.45 * pulse;     // yellow at rest, bright white at blink peak
+    const outerI = 0.20 + 0.75 * pulse;     // dim closed green at rest, bright at blink
 
-    ui.label.textContent = 'Accepted';
+    drawClosedOuter(outerI, SOFT_GREEN, 1.1);
+    for (const a of angles) drawSection(a, innerI, innerColor, 1.0);
+
+    ui.label.textContent = e < REST1 ? 'Ready' : 'Accepted';
     ui.pct.textContent = '';
     rafId = requestAnimationFrame(frame);
   }
