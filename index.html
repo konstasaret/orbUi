@@ -95,6 +95,11 @@ function render() {
     link.href = '#' + a.id;
     link.dataset.id = a.id;
     link.innerHTML = a.label + (a.sub ? `<span class="sub">${a.sub}</span>` : '');
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (location.hash !== '#' + a.id) location.hash = a.id;
+      show(a.id);
+    });
     nav.appendChild(link);
   });
   show(location.hash.slice(1) || ANIMATIONS[0].id);
