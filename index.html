@@ -286,7 +286,7 @@ function startQrAcceptance() {
     ctx.shadowBlur = 0;
   }
 
-  // a continuous white progress arc sweeping clockwise from the top
+  // a continuous white progress arc filling the outer ring clockwise from the top
   function drawProgress(frac) {
     if (frac <= 0) return;
     const total = frac * Math.PI * 2;
@@ -297,8 +297,8 @@ function startQrAcceptance() {
       const a0 = start + (i / segs) * total;
       const a1 = start + ((i + 1) / segs) * total;
       const mid = (a0 + a1) / 2;
-      ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
-      ctx.lineWidth = thicknessAt(mid);
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0, a1);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;   // matches the closed outer width
       ctx.shadowColor = rgba(WHITE, 0.9);
       ctx.shadowBlur = 22;
       ctx.strokeStyle = rgba(WHITE, 1);
@@ -341,11 +341,11 @@ function startQrAcceptance() {
     } else if (e < T_REOPEN) {
       // reopen: inner white + closed outer fade back in
       const k = (e - T_OFF) / REOPEN_DUR;
-      innerColor = WHITE; innerI = lerp(0, 0.5, k); outerI = lerp(0, 0.55, k);
+      innerColor = WHITE; innerI = lerp(0, 1.0, k); outerI = lerp(0, 0.4, k);
       label = 'Processing';
     } else {
-      // inner white, outer closed; progress sweeps from top and stalls at 10%
-      innerColor = WHITE; innerI = 0.5; outerI = 0.55;
+      // inner full white, outer closed (dim); progress sweeps the outer ring and stalls at 10%
+      innerColor = WHITE; innerI = 1.0; outerI = 0.4;
       const pe = e - T_REOPEN;
       progFrac = Math.min(STALL, STALL * (pe / PROG_DUR));
       label = 'Processing';
