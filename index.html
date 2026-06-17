@@ -321,7 +321,7 @@ function startQrAcceptance() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    let innerColor = YELLOW, innerI = 0.55, outerI = 0.20, progFrac = 0;
+    let innerColor = YELLOW, innerI = 0.55, outerI = 0.9, progFrac = 0;
     let label = 'Ready', pct = '';
 
     if (e < REST1) {
@@ -331,21 +331,21 @@ function startQrAcceptance() {
       const pulse = Math.sin((e - REST1) / BLINK_DUR * Math.PI);
       innerColor = mix(YELLOW, WHITE, pulse);
       innerI = 0.55 + 0.45 * pulse;
-      outerI = 0.20 + 0.75 * pulse;
+      outerI = 0.9 + 0.1 * pulse;
       label = 'Accepted';
     } else if (e < T_OFF) {
       // lights close: fade everything off
       const k = (e - T_BLINK) / OFF_DUR;
-      innerColor = WHITE; innerI = lerp(0.55, 0, k); outerI = lerp(0.20, 0, k);
+      innerColor = WHITE; innerI = lerp(0.55, 0, k); outerI = lerp(0.9, 0, k);
       label = 'Accepted';
     } else if (e < T_REOPEN) {
       // reopen: inner white + closed outer fade back in
       const k = (e - T_OFF) / REOPEN_DUR;
-      innerColor = WHITE; innerI = lerp(0, 1.0, k); outerI = lerp(0, 0.4, k);
+      innerColor = WHITE; innerI = lerp(0, 1.0, k); outerI = lerp(0, 0.82, k);
       label = 'Processing';
     } else {
-      // inner full white, outer closed (dim); progress sweeps the outer ring and stalls at 10%
-      innerColor = WHITE; innerI = 1.0; outerI = 0.4;
+      // inner full white, outer closed (still clearly lit); progress sweeps the outer ring and stalls at 10%
+      innerColor = WHITE; innerI = 1.0; outerI = 0.82;
       const pe = e - T_REOPEN;
       progFrac = Math.min(STALL, STALL * (pe / PROG_DUR));
       label = 'Processing';
