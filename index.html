@@ -109,7 +109,7 @@ function show(id) {
   const a = ANIMATIONS.find(x => x.id === id) || ANIMATIONS[0];
   document.querySelectorAll('.nav a').forEach(el => el.classList.toggle('active', el.dataset.id === a.id));
   if (a.file) {
-    frame.src = a.file;
+    frame.src = a.file + '?v=' + Date.now();   // cache-bust the iframe
     frame.style.display = 'block';
     empty.style.display = 'none';
   } else {
