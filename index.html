@@ -483,13 +483,88 @@ function startCaptureNotOk() {
   return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
 }
 
+function startCaptureCompleted() {
+  let rafId = null, running = true, speed = 1;
+  const cx = SIZE / 2, cy = SIZE / 2;
+  const R_OUTER = 168, R_INNER = 128;
+  const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
+  const SOFT_GREEN = [140, 210, 160];
+  const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+
+  const angles = [];
+  for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);
+  for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);
+
+  const W_TOP = 13, W_BOTTOM = 32.5;
+  const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
+
+  function drawSection(ang, intensity, color, glowScale) {
+    const a0 = ang - STEP / 2 + GAP / 2, a1 = ang + STEP / 2 - GAP / 2;
+    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang);
+    ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
+    ctx.shadowBlur = 18 * intensity * glowScale;
+    ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  function drawClosedOuter(intensity, color, glowScale) {
+    const segs = 160; ctx.lineCap = 'butt';
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2, mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0 - 0.012, a1 + 0.012);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.shadowColor = rgba(color, 0.7 * Math.min(1, intensity));
+      ctx.shadowBlur = 14 * intensity * glowScale;
+      ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  const BLOOM_MS = 700;     // brightness + glow overshoot
+  let startTime = null;
+
+  function frame(t) {
+    if (!running) return;
+    if (startTime === null) startTime = t;
+    const e = (t - startTime) * speed;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    let intensity, glow;
+    if (e < BLOOM_MS) {
+      const b = Math.sin((e / BLOOM_MS) * Math.PI);   // 0 -> 1 -> 0
+      intensity = 1 + 0.9 * b;
+      glow = 1 + 3.2 * b;
+    } else {
+      const breathe = 0.5 + 0.5 * Math.sin((e - BLOOM_MS) / 520);
+      intensity = 0.85 + 0.15 * breathe;
+      glow = 1.5 + 0.4 * breathe;
+    }
+
+    drawClosedOuter(Math.min(1, intensity), SOFT_GREEN, glow);
+    for (const a of angles) drawSection(a, intensity, SOFT_GREEN, glow);
+
+    ui.label.textContent = 'Captured';
+    ui.pct.textContent = '';
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function restart() { startTime = null; ui.pct.style.color = ''; ui.pct.style.textShadow = ''; rafId = requestAnimationFrame(frame); }
+  ui.replay.onclick = restart;
+  ui.speed.onclick = () => { speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : speed === 2 ? 0.5 : 1; ui.speed.textContent = 'Speed: ' + speed + '×'; };
+  restart();
+
+  return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
+}
+
 // ---------- registry ----------
 // start: factory returning { stop } — or null for "not built yet"
 const ANIMATIONS = [
   { id: 'qr-acceptance',     label: 'QR acceptance',         start: startQrAcceptance },
   { id: 'capture-not-ok',    label: 'During capture not OK', start: startCaptureNotOk },
   { id: 'ok-state',          label: 'OK state',              start: startOkState },
-  { id: 'capture-completed', label: 'Capture completed',     start: null },
+  { id: 'capture-completed', label: 'Capture completed',     start: startCaptureCompleted },
   { id: 'uploading-pcp',     label: 'Uploading PCP',         start: null },
   { id: 'failure',           label: 'Failure',               start: null },
 ];
