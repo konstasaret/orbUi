@@ -488,8 +488,10 @@ function startCaptureCompleted() {
   const cx = SIZE / 2, cy = SIZE / 2;
   const R_OUTER = 168, R_INNER = 128;
   const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
-  const SOFT_GREEN = [140, 210, 160];
+  const WHITE = [255, 238, 210], SOFT_GREEN = [140, 210, 160];
   const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 
   const angles = [];
   for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);
@@ -522,7 +524,34 @@ function startCaptureCompleted() {
     ctx.shadowBlur = 0;
   }
 
-  const BLOOM_MS = 700;     // brightness + glow overshoot
+  function drawProgress(frac, color) {
+    if (frac <= 0) return;
+    const total = frac * Math.PI * 2;
+    const start = -Math.PI / 2;
+    const segs = Math.max(2, Math.ceil(frac * 80));
+    ctx.lineCap = 'round';
+    for (let i = 0; i < segs; i++) {
+      const a0 = start + (i / segs) * total;
+      const a1 = start + ((i + 1) / segs) * total;
+      const mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0, a1);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.shadowColor = rgba(color, 0.9);
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = rgba(color, 1);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // timeline (ms, scaled): fill to 100% -> hold -> 2 green blinks -> close
+  const PROG_DUR = 1700, HOLD = 260, BLINK = 430, GAP_MS = 200, CLOSE = 560;
+  const T_PROG = PROG_DUR;
+  const T_HOLD = T_PROG + HOLD;
+  const T_B1 = T_HOLD + BLINK;
+  const T_G = T_B1 + GAP_MS;
+  const T_B2 = T_G + BLINK;
+  const T_CLOSE = T_B2 + CLOSE;
   let startTime = null;
 
   function frame(t) {
@@ -531,22 +560,35 @@ function startCaptureCompleted() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    let intensity, glow;
-    if (e < BLOOM_MS) {
-      const b = Math.sin((e / BLOOM_MS) * Math.PI);   // 0 -> 1 -> 0
-      intensity = 1 + 0.9 * b;
-      glow = 1 + 3.2 * b;
+    if (e < T_HOLD) {
+      // progress fills the outer ring to 100%; inner ring full white
+      const prog = Math.min(1, e / PROG_DUR);
+      drawClosedOuter(0.82, WHITE, 1.1);
+      for (const a of angles) drawSection(a, 1.0, WHITE, 1.0);
+      drawProgress(prog, WHITE);
+      ui.label.textContent = 'Capturing';
+      ui.pct.textContent = Math.round(prog * 100) + '%';
     } else {
-      const breathe = 0.5 + 0.5 * Math.sin((e - BLOOM_MS) / 520);
-      intensity = 0.85 + 0.15 * breathe;
-      glow = 1.5 + 0.4 * breathe;
+      // two soft-green success blinks on both rings, then close
+      const te = e - T_HOLD;
+      let blink = 0;
+      if (te < BLINK) blink = Math.sin(te / BLINK * Math.PI);
+      else if (te < BLINK + GAP_MS) blink = 0;
+      else if (te < 2 * BLINK + GAP_MS) blink = Math.sin((te - BLINK - GAP_MS) / BLINK * Math.PI);
+
+      let fade = 1;
+      if (e >= T_B2) fade = Math.max(0, 1 - (e - T_B2) / CLOSE);   // close down
+
+      const base = 0.22;
+      const intensity = (base + (1 - base) * blink) * fade;
+      const glow = 1 + 2.6 * blink;
+
+      drawClosedOuter(Math.min(1, intensity), SOFT_GREEN, glow);
+      for (const a of angles) drawSection(a, intensity, SOFT_GREEN, glow);
+
+      ui.label.textContent = e < T_CLOSE ? 'Captured' : '';
+      ui.pct.textContent = '';
     }
-
-    drawClosedOuter(Math.min(1, intensity), SOFT_GREEN, glow);
-    for (const a of angles) drawSection(a, intensity, SOFT_GREEN, glow);
-
-    ui.label.textContent = 'Captured';
-    ui.pct.textContent = '';
     rafId = requestAnimationFrame(frame);
   }
 
