@@ -239,10 +239,154 @@ function startOkState() {
   return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
 }
 
+// =================================================================
+// Animation: QR acceptance — show QR, scan it, accept (check), start
+// =================================================================
+function startQrAcceptance() {
+  let rafId = null, running = true, speed = 1;
+  const cx = SIZE / 2, cy = SIZE / 2;
+  const R_OUTER = 158, R_INNER = 128;
+  const WARM = [255, 238, 210], GREEN = [70, 226, 138];
+  const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
+  // --- stable QR pattern ---
+  const N = 11, Q = 150, cell = Q / N, qx = cx - Q / 2, qy = cy - Q / 2;
+  let seed = 1337;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  function isFinder(r, c) {
+    const inBox = (R, C) => r >= R && r < R + 3 && c >= C && c < C + 3;
+    return inBox(0, 0) || inBox(0, N - 3) || inBox(N - 3, 0);
+  }
+  const data = [];
+  for (let r = 0; r < N; r++) { data[r] = []; for (let c = 0; c < N; c++) data[r][c] = isFinder(r, c) ? 1 : (rand() > 0.5 ? 1 : 0); }
+  const cellCenter = (r, c) => [qx + (c + 0.5) * cell, qy + (r + 0.5) * cell];
+
+  // --- phase timeline (ms, in scaled time) ---
+  const READ0 = 0, READ1 = 1300;
+  const FLASH0 = 1300, FLASH1 = 1750;
+  const CHECK0 = 1750, CHECK1 = 2550;
+  const START0 = 2550;
+
+  let startTime = null;
+
+  function drawRings(ringAlpha, color = WARM) {
+    ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, 0, Math.PI * 2);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(color, ringAlpha); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, 0, Math.PI * 2);
+    ctx.lineWidth = 10; ctx.strokeStyle = rgba(color, 0.05); ctx.stroke();
+  }
+
+  function drawCell(r, c, intensity, color = WARM) {
+    if (intensity <= 0) return;
+    const [x, y] = cellCenter(r, c);
+    const s = cell * 0.82, rad = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - s / 2 + rad, y - s / 2);
+    ctx.arcTo(x + s / 2, y - s / 2, x + s / 2, y + s / 2, rad);
+    ctx.arcTo(x + s / 2, y + s / 2, x - s / 2, y + s / 2, rad);
+    ctx.arcTo(x - s / 2, y + s / 2, x - s / 2, y - s / 2, rad);
+    ctx.arcTo(x - s / 2, y - s / 2, x + s / 2, y - s / 2, rad);
+    ctx.closePath();
+    ctx.shadowColor = rgba(color, 0.6 * Math.min(1, intensity));
+    ctx.shadowBlur = 8 * Math.min(1, intensity);
+    ctx.fillStyle = rgba(color, 0.12 + 0.88 * Math.min(1, intensity));
+    ctx.fill(); ctx.shadowBlur = 0;
+  }
+
+  function drawCheck(progress, color, glow) {
+    // three points of the check, drawn on over `progress` 0..1
+    const p = [[-38, 4], [-10, 32], [48, -34]];
+    const seg1 = clamp(progress / 0.42, 0, 1);
+    const seg2 = clamp((progress - 0.42) / 0.58, 0, 1);
+    ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = rgba(color, 1); ctx.shadowColor = rgba(color, 0.9); ctx.shadowBlur = glow;
+    ctx.beginPath();
+    ctx.moveTo(cx + p[0][0], cy + p[0][1]);
+    ctx.lineTo(cx + p[0][0] + (p[1][0] - p[0][0]) * seg1, cy + p[0][1] + (p[1][1] - p[0][1]) * seg1);
+    if (seg2 > 0) ctx.lineTo(cx + p[1][0] + (p[2][0] - p[1][0]) * seg2, cy + p[1][1] + (p[2][1] - p[1][1]) * seg2);
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  function frame(t) {
+    if (!running) return;
+    if (startTime === null) startTime = t;
+    const e = (t - startTime) * speed;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    if (e < FLASH0) {
+      // READING: scan line sweeps top->bottom, revealing cells
+      ui.label.textContent = 'Reading';
+      ui.pct.textContent = '';
+      const prog = easeOut(clamp((e - READ0) / (READ1 - READ0), 0, 1));
+      const scanY = qy - 8 + prog * (Q + 16);
+      drawRings(0.22);
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        if (!data[r][c]) continue;
+        const [, y] = cellCenter(r, c);
+        const rev = clamp((scanY - y) / cell + 1, 0, 1);
+        drawCell(r, c, rev);
+      }
+      // scan bar
+      ctx.fillStyle = rgba(WARM, 0.85); ctx.shadowColor = rgba(WARM, 0.9); ctx.shadowBlur = 22;
+      ctx.fillRect(qx - 6, scanY - 1.5, Q + 12, 3); ctx.shadowBlur = 0;
+
+    } else if (e < CHECK0) {
+      // ACCEPTED FLASH: all cells bloom bright + expanding ring ripple
+      ui.label.textContent = 'Accepted';
+      const f = (e - FLASH0) / (FLASH1 - FLASH0);
+      const bloom = Math.sin(clamp(f, 0, 1) * Math.PI);
+      drawRings(0.22 + 0.5 * bloom);
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (data[r][c]) drawCell(r, c, 1 + 0.8 * bloom);
+      const rr = R_INNER + f * 70;
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.lineWidth = 3 * (1 - f); ctx.strokeStyle = rgba(WARM, 0.5 * (1 - f)); ctx.stroke();
+
+    } else {
+      // CHECK + START: QR fades, check draws on, then spinner runs (starting)
+      const fade = clamp(1 - (e - CHECK0) / 260, 0, 1);
+      if (fade > 0) for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (data[r][c]) drawCell(r, c, fade);
+
+      const checkProg = easeOut(clamp((e - CHECK0) / (CHECK1 - CHECK0), 0, 1));
+
+      if (e < START0) {
+        ui.label.textContent = 'Accepted';
+        drawRings(0.3);
+        drawCheck(checkProg, GREEN, 18);
+      } else {
+        // STARTING: spinner sweeps around the ring, check holds in center
+        ui.label.textContent = 'Starting';
+        drawRings(0.18);
+        drawCheck(1, GREEN, 10);
+        const a0 = (e - START0) / 1000 * 4;     // rotation
+        const span = Math.PI * 0.55;
+        const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
+        ctx.beginPath();
+        ctx.arc(cx, cy, R_INNER, a0, a0 + span);
+        ctx.lineWidth = 9; ctx.lineCap = 'round';
+        ctx.strokeStyle = rgba(WARM, 0.95);
+        ctx.shadowColor = rgba(WARM, 0.8); ctx.shadowBlur = 16;
+        ctx.stroke(); ctx.shadowBlur = 0;
+      }
+      ui.pct.textContent = '';
+    }
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function restart() { startTime = null; ui.pct.style.color = ''; ui.pct.style.textShadow = ''; rafId = requestAnimationFrame(frame); }
+  ui.replay.onclick = restart;
+  ui.speed.onclick = () => { speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : speed === 2 ? 0.5 : 1; ui.speed.textContent = 'Speed: ' + speed + '×'; };
+  restart();
+
+  return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
+}
+
 // ---------- registry ----------
 // start: factory returning { stop } — or null for "not built yet"
 const ANIMATIONS = [
-  { id: 'qr-acceptance',     label: 'QR acceptance',         start: null },
+  { id: 'qr-acceptance',     label: 'QR acceptance',         start: startQrAcceptance },
   { id: 'capture-not-ok',    label: 'During capture not OK', start: null },
   { id: 'ok-state',          label: 'OK state',              start: startOkState },
   { id: 'capture-completed', label: 'Capture completed',     start: null },
@@ -274,6 +418,8 @@ function show(id) {
   document.querySelectorAll('.nav a').forEach(el => el.classList.toggle('active', el.dataset.id === a.id));
   if (current) { current.stop(); current = null; }
   ctx.clearRect(0, 0, SIZE, SIZE);
+  ui.speed.textContent = 'Speed: 1×';
+  ui.pct.style.color = ''; ui.pct.style.textShadow = '';
   if (a.start) {
     canvasWrap.style.display = ''; controls.style.display = ''; empty.style.display = 'none';
     current = a.start();
