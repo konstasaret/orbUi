@@ -3,278 +3,117 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Diamond Orbs — Tetris Ring POC</title>
+<title>Diamond Orbs — Animations</title>
 <style>
   :root {
     --bg: #06070b;
-    --warm: 255, 238, 210;       /* warm white */
-    --warm-dim: 255, 236, 205;
+    --panel: #0c0e14;
+    --line: rgba(255, 230, 190, 0.12);
+    --text: #efe6d6;
+    --muted: rgba(239, 230, 214, 0.5);
+    --accent: rgba(255, 224, 180, 0.9);
   }
+  * { box-sizing: border-box; }
   html, body {
-    margin: 0;
-    height: 100%;
-    background: radial-gradient(circle at 50% 42%, #0c0d12 0%, var(--bg) 72%);
-    color: #efe6d6;
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
     font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
   }
-  .stage { position: relative; }
-  canvas { display: block; }
-  .hud {
-    position: absolute; inset: 0;
+  .app { display: flex; height: 100vh; }
+
+  /* sidebar */
+  .sidebar {
+    width: 248px; flex: 0 0 248px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
     display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    pointer-events: none;
+    padding: 22px 14px;
   }
-  .pct {
-    font-size: 36px; font-weight: 500; letter-spacing: 0.04em;
-    color: rgba(255, 244, 224, 0.92);
-    text-shadow: 0 0 26px rgba(255, 224, 180, 0.45);
+  .brand {
+    font-size: 13px; letter-spacing: 0.26em; text-transform: uppercase;
+    color: var(--muted); padding: 6px 12px 18px;
   }
-  .label {
-    font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.34em; opacity: 0.5; margin-top: 7px;
+  .nav { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+  .nav a {
+    display: block; text-decoration: none; color: var(--text);
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 14px; letter-spacing: 0.02em;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
   }
-  .controls { margin-top: 36px; display: flex; gap: 12px; }
-  button {
-    background: rgba(255, 230, 190, 0.06);
-    border: 1px solid rgba(255, 230, 190, 0.28);
-    color: #efe6d6; padding: 9px 18px; border-radius: 999px;
-    font-size: 13px; letter-spacing: 0.06em; cursor: pointer;
-    transition: background 0.2s;
+  .nav a:hover { background: rgba(255, 230, 190, 0.05); }
+  .nav a.active {
+    background: rgba(255, 224, 180, 0.10);
+    border-color: rgba(255, 224, 180, 0.32);
+    color: var(--accent);
   }
-  button:hover { background: rgba(255, 230, 190, 0.16); }
+  .nav a .sub { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 14px 12px 2px; }
+
+  /* stage */
+  .stage { flex: 1; position: relative; min-width: 0; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+  .empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; letter-spacing: 0.04em;
+  }
 </style>
 </head>
 <body>
-  <div class="stage">
-    <canvas id="c" width="520" height="520"></canvas>
-    <div class="hud">
-      <div class="pct" id="pct">0%</div>
-      <div class="label">Stacking</div>
-    </div>
-  </div>
-  <div class="controls">
-    <button id="replay">Replay</button>
-    <button id="speed">Speed: 1×</button>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">Diamond Orbs</div>
+      <nav class="nav" id="nav"></nav>
+      <div class="foot">Select an animation type</div>
+    </aside>
+    <main class="stage">
+      <iframe id="frame" title="animation"></iframe>
+      <div class="empty" id="empty" hidden></div>
+    </main>
   </div>
 
 <script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const DPR = window.devicePixelRatio || 1;
-const SIZE = 520;
-canvas.width = SIZE * DPR; canvas.height = SIZE * DPR;
-canvas.style.width = SIZE + 'px'; canvas.style.height = SIZE + 'px';
-ctx.scale(DPR, DPR);
+// Add a new animation by dropping a file in /animations and adding an entry here.
+// { id: url-hash slug, label: sidebar title, sub: optional subtitle, file: path or null if not built yet }
+const ANIMATIONS = [
+  { id: 'qr-acceptance',     label: 'QR acceptance',            file: null },
+  { id: 'capture-not-ok',    label: 'During capture not OK',    file: null },
+  { id: 'ok-state',          label: 'OK state',                 file: 'animations/ok-state.html' },
+  { id: 'capture-completed', label: 'Capture completed',        file: null },
+  { id: 'uploading-pcp',     label: 'Uploading PCP',            file: null },
+  { id: 'failure',           label: 'Failure',                  file: null },
+];
 
-const cx = SIZE / 2, cy = SIZE / 2;
-const R_OUTER = 158;   // thin physical outer ring
-const R_GOLD  = 143;   // solid golden border ring (between outer and inner)
-const R_INNER = 128;   // soft physical inner ring (the one that fills)
+const nav = document.getElementById('nav');
+const frame = document.getElementById('frame');
+const empty = document.getElementById('empty');
 
-const HALF = 9;                   // sections per side (bigger chunks)
-const SECTIONS = HALF * 2;        // total around the ring
-const STEP = Math.PI / HALF;      // angular size of one section
-const GAP = STEP * 0.18;          // dark gap between sections
-
-const BOTTOM = Math.PI / 2;       // canvas angle at bottom
-
-// Two chains rising from the bottom toward the top peak.
-// idx 0 = bottom entry, idx HALF-1 = near top.
-function angleR(idx) { return BOTTOM - idx * STEP; }   // right side up
-function angleL(idx) { return BOTTOM + idx * STEP; }   // left side up
-function angOf(side, idx) { return side === 'R' ? angleR(idx) : angleL(idx); }
-
-// ---- build the schedule: blocks step up from the base, locking base->top ----
-const stepDur = 60, lockPause = 110, gap = 50;
-// fill the highest slot first: each block spawns at the bottom (idx 0) and
-// travels all the way up to its target, then the stack builds downward.
-// each block fills both sides as a mirror pair, simultaneously; highest slot first.
-// idx HALF == the shared top peak, idx 0 == the shared bottom entry (full 360).
-let order = [];
-for (let j = HALF; j >= 0; j--) order.push({ target: j });
-
-// full fill should take 7s at 2x speed -> 14000ms of elapsed (scaled time)
-const TARGET_ELAPSED = 7000 * 2;
-
-let moves = [], locks = [], totalT = 0;
-function buildSchedule() {
-  moves = []; locks = []; let t = 0;
-  for (const b of order) {
-    for (let s = 0; s <= b.target; s++) {
-      moves.push({ idx: s, t0: t, t1: t + stepDur });
-      t += stepDur;
-    }
-    locks.push({ idx: b.target, tLock: t });
-    t += lockPause + gap;
-  }
-  // normalize the whole schedule so it lasts exactly TARGET_ELAPSED
-  const f = TARGET_ELAPSED / t;
-  for (const m of moves) { m.t0 *= f; m.t1 *= f; }
-  for (const l of locks) l.tLock *= f;
-  totalT = TARGET_ELAPSED;
-}
-buildSchedule();
-
-let speed = 1, startTime = null;
-
-const WARM = [255, 238, 210];
-const GREEN = [70, 226, 138];
-const GOLD = [212, 175, 55];
-function rgba(c, a) { return `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`; }
-function lerp(a, b, t) { return a + (b - a) * t; }
-function mix(c1, c2, t) { return [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)]; }
-function warm(a) { return rgba(WARM, a); }
-
-function drawRing(radius, lineWidth, alpha, color = WARM) {
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.lineWidth = lineWidth;
-  ctx.strokeStyle = rgba(color, alpha);
-  ctx.stroke();
+function render() {
+  nav.innerHTML = '';
+  ANIMATIONS.forEach(a => {
+    const link = document.createElement('a');
+    link.href = '#' + a.id;
+    link.dataset.id = a.id;
+    link.innerHTML = a.label + (a.sub ? `<span class="sub">${a.sub}</span>` : '');
+    nav.appendChild(link);
+  });
+  show(location.hash.slice(1) || ANIMATIONS[0].id);
 }
 
-const W_TOP = 13, W_BOTTOM = 32.5;   // ring is 2.5x as thick at the bottom
-function thicknessAt(ang) {
-  const v = (Math.sin(ang) + 1) / 2;   // 0 at top, 1 at bottom — gradient
-  return W_TOP + (W_BOTTOM - W_TOP) * v;
-}
-
-function drawSection(angCenter, intensity, color = WARM, glowScale = 1) {
-  // an arc segment on the inner ring, on/off
-  const a0 = angCenter - STEP / 2 + GAP / 2;
-  const a1 = angCenter + STEP / 2 - GAP / 2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R_INNER, a0, a1);
-  ctx.lineCap = 'round';
-  ctx.lineWidth = thicknessAt(angCenter);
-  ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
-  ctx.shadowBlur = 18 * intensity * glowScale;
-  ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-}
-
-// solid golden border ring, half the inner thickness, same gradient physics
-function drawGoldBorder() {
-  const segs = 180;
-  ctx.lineCap = 'butt';
-  ctx.shadowBlur = 0;
-  for (let i = 0; i < segs; i++) {
-    const a0 = (i / segs) * Math.PI * 2;
-    const a1 = ((i + 1) / segs) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, R_GOLD, a0 - 0.01, a1 + 0.01);
-    ctx.lineWidth = thicknessAt((a0 + a1) / 2) * 0.5;
-    ctx.strokeStyle = rgba(GOLD, 1);
-    ctx.stroke();
-  }
-}
-
-function frame(t) {
-  if (startTime === null) startTime = t;
-  const elapsed = (t - startTime) * speed;
-
-  ctx.clearRect(0, 0, SIZE, SIZE);
-
-  // physical thin outer ring (always present)
-  drawRing(R_OUTER, 1.5, 0.22);
-  drawGoldBorder();
-
-  // off sections (faint) so the matrix is visible
-  for (let j = 0; j <= HALF; j++) {
-    drawSection(angleR(j), 0.0);
-    drawSection(angleL(j), 0.0);
-  }
-
-  // locked sections (solid warm white) — mirror pair
-  let lockedSections = 0;
-  for (const lk of locks) {
-    if (lk.tLock <= elapsed) {
-      drawSection(angleR(lk.idx), 1.0);
-      drawSection(angleL(lk.idx), 1.0);
-      // idx 0 (bottom) and idx HALF (top) are single shared sections
-      lockedSections += (lk.idx === 0 || lk.idx === HALF) ? 1 : 2;
-    }
-  }
-
-  // traveling block (one pair at a time), stepping up to its slot
-  for (const mv of moves) {
-    if (elapsed >= mv.t0 && elapsed < mv.t1) {
-      drawSection(angleR(mv.idx), 1.0);
-      drawSection(angleL(mv.idx), 1.0);
-      break;
-    }
-  }
-
-  const pct = Math.round((lockedSections / SECTIONS) * 100);
-  document.getElementById('pct').textContent = pct + '%';
-
-  if (elapsed < totalT) requestAnimationFrame(frame);
-  else requestAnimationFrame(frameDone);
-}
-
-let successStart = null;
-const COLOR_MS = 420;   // warm -> green crossfade
-const BLOOM_MS = 700;   // flash/overshoot duration
-
-function frameDone(t) {
-  if (successStart === null) successStart = t;
-  const e = t - successStart;
-
-  ctx.clearRect(0, 0, SIZE, SIZE);
-
-  const k = Math.min(1, e / COLOR_MS);
-  const col = mix(WARM, GREEN, k);
-
-  // a single bloom: brightness + glow overshoot, then settle to a green breathe
-  let intensity, glow;
-  if (e < BLOOM_MS) {
-    const b = Math.sin((e / BLOOM_MS) * Math.PI);   // 0 -> 1 -> 0
-    intensity = 1 + 0.9 * b;
-    glow = 1 + 3.2 * b;
+function show(id) {
+  const a = ANIMATIONS.find(x => x.id === id) || ANIMATIONS[0];
+  document.querySelectorAll('.nav a').forEach(el => el.classList.toggle('active', el.dataset.id === a.id));
+  if (a.file) {
+    frame.src = a.file; frame.hidden = false; empty.hidden = true;
   } else {
-    const breathe = 0.5 + 0.5 * Math.sin((e - BLOOM_MS) / 520);
-    intensity = 0.85 + 0.15 * breathe;
-    glow = 1.5 + 0.4 * breathe;
+    frame.removeAttribute('src'); frame.hidden = true;
+    empty.textContent = '"' + a.label + '" — animation not built yet';
+    empty.hidden = false;
   }
-
-  drawRing(R_OUTER, 1.5, 0.22 + 0.25 * k, col);
-  drawGoldBorder();
-  for (let j = 0; j <= HALF; j++) {
-    drawSection(angleR(j), intensity, col, glow);
-    drawSection(angleL(j), intensity, col, glow);
-  }
-
-  const pctEl = document.getElementById('pct');
-  pctEl.textContent = '100%';
-  pctEl.style.color = rgba(col, 0.95);
-  pctEl.style.textShadow = `0 0 26px ${rgba(col, 0.5)}`;
-
-  requestAnimationFrame(frameDone);
 }
 
-function start() {
-  startTime = null;
-  successStart = null;
-  const pctEl = document.getElementById('pct');
-  pctEl.style.color = '';
-  pctEl.style.textShadow = '';
-  requestAnimationFrame(frame);
-}
-
-document.getElementById('replay').onclick = start;
-document.getElementById('speed').onclick = (e) => {
-  speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1;
-  e.target.textContent = 'Speed: ' + speed + '×';
-};
-
-start();
+window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+render();
 </script>
 </body>
 </html>
