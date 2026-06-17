@@ -240,74 +240,43 @@ function startOkState() {
 }
 
 // =================================================================
-// Animation: QR acceptance — show QR, scan it, accept (check), start
+// Animation: QR acceptance — yellow ring rests, "reads" with a sweep,
+// then settles to warm white (same ring as OK state)
 // =================================================================
 function startQrAcceptance() {
   let rafId = null, running = true, speed = 1;
   const cx = SIZE / 2, cy = SIZE / 2;
   const R_OUTER = 158, R_INNER = 128;
-  const WARM = [255, 238, 210], GREEN = [70, 226, 138];
+  const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
+  const WARM_WHITE = [255, 238, 210], WARM_YELLOW = [255, 196, 84];
   const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 
-  // --- stable QR pattern ---
-  const N = 11, Q = 150, cell = Q / N, qx = cx - Q / 2, qy = cy - Q / 2;
-  let seed = 1337;
-  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  function isFinder(r, c) {
-    const inBox = (R, C) => r >= R && r < R + 3 && c >= C && c < C + 3;
-    return inBox(0, 0) || inBox(0, N - 3) || inBox(N - 3, 0);
-  }
-  const data = [];
-  for (let r = 0; r < N; r++) { data[r] = []; for (let c = 0; c < N; c++) data[r][c] = isFinder(r, c) ? 1 : (rand() > 0.5 ? 1 : 0); }
-  const cellCenter = (r, c) => [qx + (c + 0.5) * cell, qy + (r + 0.5) * cell];
+  // full-circle section centre angles (same geometry as OK state)
+  const angles = [];
+  for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);   // right side incl bottom + top
+  for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);    // left side interior
+  const TWO_PI = Math.PI * 2;
+  const angDist = (a, b) => { let d = Math.abs(a - b) % TWO_PI; return d > Math.PI ? TWO_PI - d : d; };
 
-  // --- phase timeline (ms, in scaled time) ---
-  const READ0 = 0, READ1 = 1300;
-  const FLASH0 = 1300, FLASH1 = 1750;
-  const CHECK0 = 1750, CHECK1 = 2550;
-  const START0 = 2550;
-
-  let startTime = null;
-
-  function drawRings(ringAlpha, color = WARM) {
-    ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, 0, Math.PI * 2);
-    ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(color, ringAlpha); ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, 0, Math.PI * 2);
-    ctx.lineWidth = 10; ctx.strokeStyle = rgba(color, 0.05); ctx.stroke();
-  }
-
-  function drawCell(r, c, intensity, color = WARM) {
-    if (intensity <= 0) return;
-    const [x, y] = cellCenter(r, c);
-    const s = cell * 0.82, rad = 2;
-    ctx.beginPath();
-    ctx.moveTo(x - s / 2 + rad, y - s / 2);
-    ctx.arcTo(x + s / 2, y - s / 2, x + s / 2, y + s / 2, rad);
-    ctx.arcTo(x + s / 2, y + s / 2, x - s / 2, y + s / 2, rad);
-    ctx.arcTo(x - s / 2, y + s / 2, x - s / 2, y - s / 2, rad);
-    ctx.arcTo(x - s / 2, y - s / 2, x + s / 2, y - s / 2, rad);
-    ctx.closePath();
-    ctx.shadowColor = rgba(color, 0.6 * Math.min(1, intensity));
-    ctx.shadowBlur = 8 * Math.min(1, intensity);
-    ctx.fillStyle = rgba(color, 0.12 + 0.88 * Math.min(1, intensity));
-    ctx.fill(); ctx.shadowBlur = 0;
-  }
-
-  function drawCheck(progress, color, glow) {
-    // three points of the check, drawn on over `progress` 0..1
-    const p = [[-38, 4], [-10, 32], [48, -34]];
-    const seg1 = clamp(progress / 0.42, 0, 1);
-    const seg2 = clamp((progress - 0.42) / 0.58, 0, 1);
-    ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = rgba(color, 1); ctx.shadowColor = rgba(color, 0.9); ctx.shadowBlur = glow;
-    ctx.beginPath();
-    ctx.moveTo(cx + p[0][0], cy + p[0][1]);
-    ctx.lineTo(cx + p[0][0] + (p[1][0] - p[0][0]) * seg1, cy + p[0][1] + (p[1][1] - p[0][1]) * seg1);
-    if (seg2 > 0) ctx.lineTo(cx + p[1][0] + (p[2][0] - p[1][0]) * seg2, cy + p[1][1] + (p[2][1] - p[1][1]) * seg2);
+  const W_TOP = 13, W_BOTTOM = 32.5;
+  const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
+  function drawSection(ang, intensity, color, glowScale = 1) {
+    const a0 = ang - STEP / 2 + GAP / 2, a1 = ang + STEP / 2 - GAP / 2;
+    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang);
+    ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
+    ctx.shadowBlur = 18 * intensity * glowScale;
+    ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
     ctx.stroke(); ctx.shadowBlur = 0;
   }
+
+  // timeline (ms, scaled): rest+read -> settle to warm white
+  const READ1 = 2800;     // reading sweep duration
+  const SETTLE1 = 3500;   // crossfade to warm white done
+  let startTime = null;
 
   function frame(t) {
     if (!running) return;
@@ -315,63 +284,37 @@ function startQrAcceptance() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    if (e < FLASH0) {
-      // READING: scan line sweeps top->bottom, revealing cells
+    let color, base, sweepBoost, glow;
+    if (e < READ1) {
+      // READING: warm yellow ring with a bright sweep travelling around it
       ui.label.textContent = 'Reading';
-      ui.pct.textContent = '';
-      const prog = easeOut(clamp((e - READ0) / (READ1 - READ0), 0, 1));
-      const scanY = qy - 8 + prog * (Q + 16);
-      drawRings(0.22);
-      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-        if (!data[r][c]) continue;
-        const [, y] = cellCenter(r, c);
-        const rev = clamp((scanY - y) / cell + 1, 0, 1);
-        drawCell(r, c, rev);
-      }
-      // scan bar
-      ctx.fillStyle = rgba(WARM, 0.85); ctx.shadowColor = rgba(WARM, 0.9); ctx.shadowBlur = 22;
-      ctx.fillRect(qx - 6, scanY - 1.5, Q + 12, 3); ctx.shadowBlur = 0;
-
-    } else if (e < CHECK0) {
-      // ACCEPTED FLASH: all cells bloom bright + expanding ring ripple
+      color = WARM_YELLOW; base = 0.5; sweepBoost = 0.9; glow = 1;
+    } else if (e < SETTLE1) {
+      // SETTLE: crossfade yellow -> warm white, sweep fades, ring fills in
+      const p = clamp((e - READ1) / (SETTLE1 - READ1), 0, 1);
       ui.label.textContent = 'Accepted';
-      const f = (e - FLASH0) / (FLASH1 - FLASH0);
-      const bloom = Math.sin(clamp(f, 0, 1) * Math.PI);
-      drawRings(0.22 + 0.5 * bloom);
-      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (data[r][c]) drawCell(r, c, 1 + 0.8 * bloom);
-      const rr = R_INNER + f * 70;
-      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-      ctx.lineWidth = 3 * (1 - f); ctx.strokeStyle = rgba(WARM, 0.5 * (1 - f)); ctx.stroke();
-
+      color = mix(WARM_YELLOW, WARM_WHITE, p); base = lerp(0.5, 1, p); sweepBoost = 0.9 * (1 - p); glow = 1;
     } else {
-      // CHECK + START: QR fades, check draws on, then spinner runs (starting)
-      const fade = clamp(1 - (e - CHECK0) / 260, 0, 1);
-      if (fade > 0) for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (data[r][c]) drawCell(r, c, fade);
-
-      const checkProg = easeOut(clamp((e - CHECK0) / (CHECK1 - CHECK0), 0, 1));
-
-      if (e < START0) {
-        ui.label.textContent = 'Accepted';
-        drawRings(0.3);
-        drawCheck(checkProg, GREEN, 18);
-      } else {
-        // STARTING: spinner sweeps around the ring, check holds in center
-        ui.label.textContent = 'Starting';
-        drawRings(0.18);
-        drawCheck(1, GREEN, 10);
-        const a0 = (e - START0) / 1000 * 4;     // rotation
-        const span = Math.PI * 0.55;
-        const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-        ctx.beginPath();
-        ctx.arc(cx, cy, R_INNER, a0, a0 + span);
-        ctx.lineWidth = 9; ctx.lineCap = 'round';
-        ctx.strokeStyle = rgba(WARM, 0.95);
-        ctx.shadowColor = rgba(WARM, 0.8); ctx.shadowBlur = 16;
-        ctx.stroke(); ctx.shadowBlur = 0;
-      }
-      ui.pct.textContent = '';
+      // SETTLED: steady warm white (matches OK state), gentle breathe
+      ui.label.textContent = 'Accepted';
+      const breathe = 0.5 + 0.5 * Math.sin((e - SETTLE1) / 600);
+      color = WARM_WHITE; base = 0.92 + 0.08 * breathe; sweepBoost = 0; glow = 1.1 + 0.2 * breathe;
     }
 
+    // thin outer ring
+    ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, 0, TWO_PI);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(color, 0.22); ctx.stroke();
+
+    const sweep = BOTTOM + (e / 1000) * 3.4;   // rotating reader position
+    for (const a of angles) {
+      let intensity = base;
+      if (sweepBoost > 0) {
+        const h = Math.exp(-Math.pow(angDist(a, sweep) / 0.5, 2));
+        intensity = Math.min(1.6, base + sweepBoost * h);
+      }
+      drawSection(a, intensity, color, glow);
+    }
+    ui.pct.textContent = '';
     rafId = requestAnimationFrame(frame);
   }
 
