@@ -109,11 +109,14 @@ function show(id) {
   const a = ANIMATIONS.find(x => x.id === id) || ANIMATIONS[0];
   document.querySelectorAll('.nav a').forEach(el => el.classList.toggle('active', el.dataset.id === a.id));
   if (a.file) {
-    frame.src = a.file; frame.hidden = false; empty.hidden = true;
+    frame.src = a.file;
+    frame.style.display = 'block';
+    empty.style.display = 'none';
   } else {
-    frame.removeAttribute('src'); frame.hidden = true;
+    frame.removeAttribute('src');
+    frame.style.display = 'none';
     empty.textContent = '"' + a.label + '" — animation not built yet';
-    empty.hidden = false;
+    empty.style.display = 'flex';
   }
 }
 
