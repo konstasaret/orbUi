@@ -369,11 +369,125 @@ function startQrAcceptance() {
   return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
 }
 
+function startCaptureNotOk() {
+  let rafId = null, running = true, speed = 1;
+  const cx = SIZE / 2, cy = SIZE / 2;
+  const R_OUTER = 168, R_INNER = 128;
+  const HALF = 9, STEP = Math.PI / HALF, GAP = STEP * 0.18, BOTTOM = Math.PI / 2;
+  const WHITE = [255, 238, 210];
+  const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smooth = (t) => t * t * (3 - 2 * t);
+
+  const angles = [];
+  for (let i = 0; i <= HALF; i++) angles.push(BOTTOM - i * STEP);
+  for (let i = 1; i < HALF; i++) angles.push(BOTTOM + i * STEP);
+
+  const W_TOP = 13, W_BOTTOM = 32.5;
+  const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
+
+  function drawSection(ang, intensity, color, glowScale) {
+    const a0 = ang - STEP / 2 + GAP / 2, a1 = ang + STEP / 2 - GAP / 2;
+    ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+    ctx.lineCap = 'round'; ctx.lineWidth = thicknessAt(ang);
+    ctx.shadowColor = rgba(color, 0.85 * Math.min(1, intensity));
+    ctx.shadowBlur = 18 * intensity * glowScale;
+    ctx.strokeStyle = rgba(color, 0.10 + 0.9 * Math.min(1, intensity));
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  function drawClosedOuter(intensity, color, glowScale) {
+    const segs = 160; ctx.lineCap = 'butt';
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2, mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0 - 0.012, a1 + 0.012);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.shadowColor = rgba(color, 0.7 * Math.min(1, intensity));
+      ctx.shadowBlur = 14 * intensity * glowScale;
+      ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  function drawProgress(frac) {
+    if (frac <= 0) return;
+    const total = frac * Math.PI * 2;
+    const start = -Math.PI / 2;
+    const segs = Math.max(2, Math.ceil(frac * 80));
+    ctx.lineCap = 'round';
+    for (let i = 0; i < segs; i++) {
+      const a0 = start + (i / segs) * total;
+      const a1 = start + ((i + 1) / segs) * total;
+      const mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0, a1);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.shadowColor = rgba(WHITE, 0.9);
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = rgba(WHITE, 1);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // breathing periods (ms): calm normal vs. faster "wrong position"
+  const NORMAL_PERIOD = 3000, FAST_PERIOD = 1150;
+  // wrong-position window (scaled ms), with smooth ramps in/out
+  const WRONG_IN = 3200, WRONG_HOLD = 3800, RAMP = 900;
+  const WRONG_OUT = WRONG_IN + WRONG_HOLD;
+  // outer progress creeps slowly to 60%
+  const PROG_TOTAL = 13000, PROG_TARGET = 0.60;
+
+  function wrongness(e) {
+    if (e < WRONG_IN) return 0;
+    if (e < WRONG_IN + RAMP) return smooth((e - WRONG_IN) / RAMP);
+    if (e < WRONG_OUT) return 1;
+    if (e < WRONG_OUT + RAMP) return 1 - smooth((e - WRONG_OUT) / RAMP);
+    return 0;
+  }
+
+  let startTime = null, lastT = null, phase = 0;
+
+  function frame(t) {
+    if (!running) return;
+    if (startTime === null) { startTime = t; lastT = t; }
+    const e = (t - startTime) * speed;
+    const dt = (t - lastT) * speed; lastT = t;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    const w = wrongness(e);                              // 0 calm, 1 wrong position
+    const period = lerp(NORMAL_PERIOD, FAST_PERIOD, w);
+    phase += dt * (2 * Math.PI / period);
+    const breathe = 0.5 + 0.5 * Math.sin(phase);         // 0..1
+
+    // calm breath swings gently; wrong position breathes harder + brighter
+    const lo = lerp(0.42, 0.5, w), hi = lerp(0.85, 1.0, w);
+    const innerI = lo + (hi - lo) * breathe;
+
+    const prog = Math.min(PROG_TARGET, PROG_TARGET * (e / PROG_TOTAL));
+
+    drawClosedOuter(0.82, WHITE, 1.1);
+    for (const a of angles) drawSection(a, innerI, WHITE, 1.0);
+    drawProgress(prog);
+
+    ui.label.textContent = w > 0.5 ? 'Adjust position' : 'Capturing';
+    ui.pct.textContent = Math.round(prog * 100) + '%';
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function restart() { startTime = null; lastT = null; phase = 0; ui.pct.style.color = ''; ui.pct.style.textShadow = ''; rafId = requestAnimationFrame(frame); }
+  ui.replay.onclick = restart;
+  ui.speed.onclick = () => { speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : speed === 2 ? 0.5 : 1; ui.speed.textContent = 'Speed: ' + speed + '×'; };
+  restart();
+
+  return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
+}
+
 // ---------- registry ----------
 // start: factory returning { stop } — or null for "not built yet"
 const ANIMATIONS = [
   { id: 'qr-acceptance',     label: 'QR acceptance',         start: startQrAcceptance },
-  { id: 'capture-not-ok',    label: 'During capture not OK', start: null },
+  { id: 'capture-not-ok',    label: 'During capture not OK', start: startCaptureNotOk },
   { id: 'ok-state',          label: 'OK state',              start: startOkState },
   { id: 'capture-completed', label: 'Capture completed',     start: null },
   { id: 'uploading-pcp',     label: 'Uploading PCP',         start: null },
