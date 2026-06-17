@@ -600,6 +600,83 @@ function startCaptureCompleted() {
   return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
 }
 
+function startUploadingPcp() {
+  let rafId = null, running = true, speed = 1;
+  const cx = SIZE / 2, cy = SIZE / 2;
+  const R_OUTER = 168, R_INNER = 128;
+  const HALF = 9, STEP = Math.PI / HALF, BOTTOM = Math.PI / 2;
+  const WHITE = [255, 238, 210];
+  const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+
+  const W_TOP = 13, W_BOTTOM = 32.5;
+  const thicknessAt = (ang) => W_TOP + (W_BOTTOM - W_TOP) * ((Math.sin(ang) + 1) / 2);
+
+  function drawClosedOuter(intensity, color) {
+    const segs = 160; ctx.lineCap = 'butt';
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2, mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_OUTER, a0 - 0.012, a1 + 0.012);
+      ctx.lineWidth = thicknessAt(mid) * 0.5;
+      ctx.strokeStyle = rgba(color, 0.08 + 0.92 * Math.min(1, intensity));
+      ctx.stroke();
+    }
+  }
+
+  // a spinning comet on the inner ring: bright head, fading tail
+  function drawSpinner(head) {
+    const span = Math.PI * 1.55;     // angular length of the comet tail
+    const segs = 96;
+    ctx.lineCap = 'round';
+    // faint full track so the ring reads as continuous
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2, mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+      ctx.lineWidth = thicknessAt(mid);
+      ctx.strokeStyle = rgba(WHITE, 0.07);
+      ctx.stroke();
+    }
+    // the comet, drawn from head backwards
+    for (let i = 0; i < segs; i++) {
+      const back = (i / segs) * span;            // distance behind the head
+      const a = head - back;
+      const op = 1 - back / span;                // 1 at head, 0 at tail
+      const seg = span / segs;
+      ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a - seg / 2, a + seg / 2);
+      ctx.lineWidth = thicknessAt(a);
+      ctx.shadowColor = rgba(WHITE, 0.6 * op);
+      ctx.shadowBlur = 16 * op;
+      ctx.strokeStyle = rgba(WHITE, 0.05 + 0.95 * op * op);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  const SPIN_PERIOD = 1100;          // ms per full revolution
+  let startTime = null;
+
+  function frame(t) {
+    if (!running) return;
+    if (startTime === null) startTime = t;
+    const e = (t - startTime) * speed;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    const head = -Math.PI / 2 - (e / SPIN_PERIOD) * Math.PI * 2;   // clockwise from top
+    drawClosedOuter(0.82, WHITE);
+    drawSpinner(head);
+
+    ui.label.textContent = 'Uploading';
+    ui.pct.textContent = '';
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function restart() { startTime = null; ui.pct.style.color = ''; ui.pct.style.textShadow = ''; rafId = requestAnimationFrame(frame); }
+  ui.replay.onclick = restart;
+  ui.speed.onclick = () => { speed = speed === 1 ? 1.5 : speed === 1.5 ? 2 : speed === 2 ? 0.5 : 1; ui.speed.textContent = 'Speed: ' + speed + '×'; };
+  restart();
+
+  return { stop() { running = false; if (rafId) cancelAnimationFrame(rafId); ui.replay.onclick = null; ui.speed.onclick = null; } };
+}
+
 // ---------- registry ----------
 // start: factory returning { stop } — or null for "not built yet"
 const ANIMATIONS = [
@@ -607,7 +684,7 @@ const ANIMATIONS = [
   { id: 'capture-not-ok',    label: 'During capture not OK', start: startCaptureNotOk },
   { id: 'ok-state',          label: 'OK state',              start: startOkState },
   { id: 'capture-completed', label: 'Capture completed',     start: startCaptureCompleted },
-  { id: 'uploading-pcp',     label: 'Uploading PCP',         start: null },
+  { id: 'uploading-pcp',     label: 'Uploading PCP',         start: startUploadingPcp },
   { id: 'failure',           label: 'Failure',               start: null },
 ];
 
