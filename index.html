@@ -286,8 +286,33 @@ function startQrAcceptance() {
     ctx.shadowBlur = 0;
   }
 
-  // timeline (ms, scaled): rest -> single blink -> hold rest
-  const REST1 = 1400, BLINK_DUR = 750;
+  // a continuous white progress arc sweeping clockwise from the top
+  function drawProgress(frac) {
+    if (frac <= 0) return;
+    const total = frac * Math.PI * 2;
+    const start = -Math.PI / 2;                 // top of the canvas
+    const segs = Math.max(2, Math.ceil(frac * 80));
+    ctx.lineCap = 'round';
+    for (let i = 0; i < segs; i++) {
+      const a0 = start + (i / segs) * total;
+      const a1 = start + ((i + 1) / segs) * total;
+      const mid = (a0 + a1) / 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R_INNER, a0, a1);
+      ctx.lineWidth = thicknessAt(mid);
+      ctx.shadowColor = rgba(WHITE, 0.9);
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = rgba(WHITE, 1);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // timeline (ms, scaled): rest -> blink -> lights off -> reopen white -> stalled progress
+  const REST1 = 1400, BLINK_DUR = 750, OFF_DUR = 420, REOPEN_DUR = 450, PROG_DUR = 700;
+  const T_BLINK = REST1 + BLINK_DUR;
+  const T_OFF = T_BLINK + OFF_DUR;
+  const T_REOPEN = T_OFF + REOPEN_DUR;
+  const STALL = 0.10;                            // progress freezes at 10%
   let startTime = null;
 
   function frame(t) {
@@ -296,19 +321,43 @@ function startQrAcceptance() {
     const e = (t - startTime) * speed;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    // one blink: a single sine hump during [REST1, REST1+BLINK_DUR]
-    let pulse = 0;
-    if (e >= REST1 && e < REST1 + BLINK_DUR) pulse = Math.sin((e - REST1) / BLINK_DUR * Math.PI);
+    let innerColor = YELLOW, innerI = 0.55, outerI = 0.20, progFrac = 0;
+    let label = 'Ready', pct = '';
 
-    const innerColor = mix(YELLOW, WHITE, pulse);
-    const innerI = 0.55 + 0.45 * pulse;     // yellow at rest, bright white at blink peak
-    const outerI = 0.20 + 0.75 * pulse;     // dim closed green at rest, bright at blink
+    if (e < REST1) {
+      // resting: yellow inner, closed dim-green outer
+    } else if (e < T_BLINK) {
+      // one blink: single sine hump
+      const pulse = Math.sin((e - REST1) / BLINK_DUR * Math.PI);
+      innerColor = mix(YELLOW, WHITE, pulse);
+      innerI = 0.55 + 0.45 * pulse;
+      outerI = 0.20 + 0.75 * pulse;
+      label = 'Accepted';
+    } else if (e < T_OFF) {
+      // lights close: fade everything off
+      const k = (e - T_BLINK) / OFF_DUR;
+      innerColor = WHITE; innerI = lerp(0.55, 0, k); outerI = lerp(0.20, 0, k);
+      label = 'Accepted';
+    } else if (e < T_REOPEN) {
+      // reopen: inner white + closed outer fade back in
+      const k = (e - T_OFF) / REOPEN_DUR;
+      innerColor = WHITE; innerI = lerp(0, 0.5, k); outerI = lerp(0, 0.55, k);
+      label = 'Processing';
+    } else {
+      // inner white, outer closed; progress sweeps from top and stalls at 10%
+      innerColor = WHITE; innerI = 0.5; outerI = 0.55;
+      const pe = e - T_REOPEN;
+      progFrac = Math.min(STALL, STALL * (pe / PROG_DUR));
+      label = 'Processing';
+      pct = Math.round(progFrac * 100) + '%';
+    }
 
-    drawClosedOuter(outerI, SOFT_GREEN, 1.1);
+    drawClosedOuter(outerI, e < T_OFF ? SOFT_GREEN : WHITE, 1.1);
     for (const a of angles) drawSection(a, innerI, innerColor, 1.0);
+    drawProgress(progFrac);
 
-    ui.label.textContent = e < REST1 ? 'Ready' : 'Accepted';
-    ui.pct.textContent = '';
+    ui.label.textContent = label;
+    ui.pct.textContent = pct;
     rafId = requestAnimationFrame(frame);
   }
 
